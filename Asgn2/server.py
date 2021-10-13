@@ -1,5 +1,7 @@
 import socket
-import select
+import sys
+from _thread import *
+from helper import *
 
 HEADER_LENGTH = 10
 IP = "127.0.0.1"
@@ -12,62 +14,204 @@ server_socket.bind((IP, PORT))
 
 server_socket.listen()
 
-sockets_list = [server_socket]
-
+sockets_to_clients = {}
+sockets_from_clients = {}
 clients = {}
+status = {}
 
+def client_thread(from_socket, to_socket, username):
+  username = sockets_from_clients[from_socket]
 
-def recv_msg(client_socket):
-  try:
-    message_header = client_socket.recv(HEADER_LENGTH)
+  while True:
 
-    if not len(message_header):
-      return False
+    if status[username] == 3:
+      continue
 
-    message_length = int(message_header.decode("utf-8").strip())
-    return {"header": message_header, "data": client_socket.recv(message_length)}
+    message = recv_msg(from_socket)
 
-  except:
-    return False
+    if message == False:
+      break
+
+    msg_data = message['data'].decode('utf-8')
+
+    if msg_data[0:msg_data.find(" ")] == "SEND":
+      msg_data = msg_data[msg_data.find(" ")+1:]
+      recepient_username = msg_data[0:msg_data.find("\n")]
+      msg_data = msg_data[msg_data.find("\n")+1:]
+
+      if msg_data[0:msg_data.find(" ")] != "Content-length:":
+        send_msg(to_socket, "ERROR 103 Header incomplete \n\n")
+        continue
+
+      msg_data = msg_data[msg_data.find(" ")+1:]
+      length = int(msg_data[0:msg_data.find("\n")])
+      msg_data = msg_data[msg_data.find("\n\n")+2:]
+      msg_text = msg_data[0:length]
+
+      if recepient_username not in sockets_to_clients.keys():
+        send_msg(to_socket, "ERROR 102 Unable to send\n\n")
+        continue
+
+      forwarded_message = "FORWARD " + username + "\nContent-length: " + str(length) + "\n\n" + msg_text
+      print(forwarded_message)
+      clients[recepient_username] = (clients[recepient_username][0], clients[recepient_username][1], 3)
+      send_msg(sockets_to_clients[recepient_username], forwarded_message)
+      status[username] = 3
+
+    elif msg_data[0:msg_data.find(" ") == "RECEIVED"]:
+      msg_data = msg_data[msg_data.find(" ")+1:]
+      sender_username = msg_data[0:msg_data.find("\n")]
+
+      send_msg(sockets_to_clients[sender_username], f"SEND {username}\n\n")
+      status[sender_username] = 2
+
+    else:
+      continue
+
+  # while True:
+
+  #   if status[username] == 3:
+  #     continue
+
+  #   message = recv_msg(from_socket)
+  #   if message == False:
+  #     break
+
+  #   status[username] = 3
+
+  #   msg_data = message['data'].decode('utf-8')
+
+  #   if msg_data[0:msg_data.find(" ")] == "SEND":
+  #     msg_data = msg_data[msg_data.find(" ")+1:]
+  #     recepient_username = msg_data[0:msg_data.find("\n")]
+  #     msg_data = msg_data[msg_data.find("\n")+1]
+
+  #     if msg_data[0:msg_data.find(" ")] != "Content-length:":
+  #       clients[username] = (from_socket, to_socket, 2)
+  #       send_msg(to_socket, "ERROR 103 Header incomplete \n\n")
+
+  #     else:
+  #       msg_data = msg_data[msg_data.find(" ")+1:]
+  #       length = int(msg_data[0:msg_data.find("\n")])
+  #       msg_data = msg_data[msg_data.find("\n\n")+1]
+  #       msg_text = msg_data[0:length]
+
+  #       if recepient_username not in sockets_to_clients.keys():
+  #         clients[username] = (from_socket, to_socket, 2)
+  #         send_msg(to_socket, "ERROR 102 Unable to send\n\n")
+
+  #       elif recepient_username == "ALL":
+  #         recepient_list = sockets_to_clients.key()
+
+  #         for recepient_username in recepient_list:
+
+  #           if recepient_username == username:
+  #             continue
+
+  #           else:
+  #             recepient_to_socket = sockets_to_clients[recepient_username]
+
+  #             forwarded_message = "FORWARD " + username + "\nContent-length: " + str(length) + "\n\n" + msg_text
+  #             clients[recepient_username] = (clients[recepient_username][0], clients[recepient_username][1], 3)
+  #             send_msg(recepient_to_socket, forwarded_message)
+
+  #             recepient_from_socket = clients[recepient_username][0]
+  #             receiver_confirmation_message = recv_msg(recepient_from_socket)['data'].decode('utf-8')
+
+  #             clients[recepient_username] = (clients[recepient_username][0], clients[recepient_username][1], 2)
+  #             clients[username] = (from_socket, to_socket, 2)
+
+  #             if receiver_confirmation_message[0:8] == "RECEIVED":
+  #               sender_username = receiver_confirmation_message[9:receiver_confirmation_message.find("\n")]
+
+  #               if sender_username == username:
+  #                 sender_confirmation_message = "SEND " + recepient_username + "\n\n"
+  #                 send_msg(to_socket, sender_confirmation_message)
+
+  #               else:
+  #                 send_msg(to_socket, "ERROR 102 Unable to send\n\n")
+  #                 break
+
+  #             else:
+  #               send_msg(to_socket, "ERROR 102 Unable to send\n\n")
+  #               break
+
+  #       else:
+  #         recepient_to_socket = sockets_to_clients[recepient_username]
+
+  #         forwarded_message = "FORWARD " + username + "\nContent-length: " + str(length) + "\n\n" + msg_text
+  #         clients[recepient_username] = (clients[recepient_username][0], clients[recepient_username][1], 3)
+  #         send_msg(recepient_to_socket, forwarded_message)
+
+  #         recepient_from_socket = clients[recepient_username][0]
+  #         receiver_confirmation_message = recv_msg(recepient_from_socket)
+
+  #         clients[recepient_username] = (clients[recepient_username][0], clients[recepient_username][1], 2)
+  #         clients[username] = (from_socket, to_socket, 2)
+
+  #         if receiver_confirmation_message[0:8] == "RECEIVED":
+  #           sender_username = receiver_confirmation_message[9:receiver_confirmation_message.find("\n")]
+
+  #           if sender_username == username:
+  #             sender_confirmation_message = "SEND " + recepient_username + "\n\n"
+  #             send_msg(to_socket, sender_confirmation_message)
+
+  #           else:
+  #             send_msg(to_socket, "ERROR 102 Unable to send\n\n")
+
+  #         else:
+  #           send_msg(to_socket, "ERROR 102 Unable to send\n\n")
+      
+  #   else:
+  #     clients[username] = (from_socket, to_socket, 2)
+  #     send_msg(to_socket, "ERROR 103 Header incomplete \n\n")
+      
+  print(f"Closed connection from {username}")
+  del sockets_from_clients[from_socket]
+  del sockets_to_clients[username]
+  del clients[username]
+  from_socket.close()
+  to_socket.close()
 
 
 while True:
+  
+  client_socket, client_address = server_socket.accept()
 
-  read_sockets, _, exception_sockets = select.select(sockets_list, [], sockets_list)
+  registration_message = recv_msg(client_socket)
+  if registration_message is False:
+    continue
 
-  for notified_socket in read_sockets:
-    if notified_socket == server_socket:
-      client_socket, client_address = server_socket.accept()
+  msg_data = registration_message['data'].decode('utf-8')
+  username = msg_data[16:int(msg_data.find("\n"))]
 
-      user = recv_msg(client_socket)
-      if user is False:
-        continue
+  if not username.isalnum():
+    msg_to_client = "ERROR 100 Malformed username\n\n".encode('utf-8')
+    message_header = f"{len(msg_to_client):<{HEADER_LENGTH}}"
+    client_socket.send(message_header + msg_to_client)
 
-      sockets_list.append(client_socket)
-      clients[client_socket] = user
+  if msg_data[0:15] == "REGISTER TOSEND" and client_socket not in sockets_from_clients.keys():
+    sockets_from_clients[client_socket] = username
+    clients[username] = (client_socket, client_socket)
+    status[username] = 1
 
-      msg = user["data"].decode("utf-8")
-      print(f"Accepted new connection from {client_address[0]}:{client_address[1]} username : {msg}")
+    send_msg(client_socket, f"REGISTERED TOSEND {username}\n\n")
 
-    else:
-      message = recv_msg(notified_socket)
+  elif msg_data[0:15] == "REGISTER TORECV" and status[username] == 1:
+    sockets_to_clients[username] = client_socket
+    from_socket = clients[username][0]
+    clients[username] = (from_socket, client_socket)
+    status[username] = 2
 
-      user = clients[notified_socket]
-      username = user["data"].decode("utf-8")
-      if message == False:
-        print(f"Closed connection from {username}")
-        sockets_list.remove(notified_socket)
-        del clients[notified_socket]
-        continue
 
-      msg_data = message["data"].decode("utf-8")
-      print(f"received message from {username} : {msg_data}")
+    send_msg(client_socket, f"REGISTERED TORECV {username}\n\n")
+    print("Accepted connection from ", username)
 
-      for client_socket in clients:
-        if client_socket != notified_socket:
-          client_socket.send(user["header"] + user["data"] + message["header"] + message["data"])
+    start_new_thread(client_thread, (from_socket, client_socket, username))
 
-  for notified_socket in exception_sockets:
-    sockets_list.remove(notified_socket)
-    del clients[notified_socket]
 
+  else:
+    send_msg(client_socket, "ERROR 101 No user registered\n\n")
+
+
+  
